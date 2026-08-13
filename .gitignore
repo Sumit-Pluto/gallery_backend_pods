@@ -1,0 +1,27 @@
+# Secrets — never commit. Env vars are set on the pod, not in the repo.
+.env
+.env.*
+!.env.example
+
+# Model weights live on the RunPod network volume, not in git.
+# See deploy/volume/README.md.
+*.pt
+*.pth
+*.onnx
+*.safetensors
+*.bin
+*.gguf
+
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+*.egg-info/
+build/
+dist/
+
+.DS_Store
+.idea/
+.vscode/

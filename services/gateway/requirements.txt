@@ -1,0 +1,7 @@
+# Gateway: pure IO. No models, no torch — this image is ~150 MB and starts in
+# under a second, which is what makes it safe to redeploy at any time.
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+httpx==0.28.1
+pydantic==2.10.4
+Pillow==10.4.0

@@ -1,0 +1,39 @@
+# Keep the build context to what the Dockerfiles actually COPY.
+#
+# This is not just about size: every file in the context is hashed, so without
+# this a README edit invalidates the build cache and rebuilds torch. That would
+# quietly undo the "only rebuild what changed" property this repo is built for.
+
+.git
+.github
+.pytest_cache
+.ruff_cache
+__pycache__
+**/__pycache__
+*.py[cod]
+*.egg-info
+.venv
+venv
+
+docs
+tests
+scripts
+deploy/pods
+deploy/volume
+deploy/scripts
+# deploy/entrypoint.sh IS copied — do not exclude it.
+
+.env
+.env.*
+!.env.example
+README.md
+Makefile
+docker-compose.yml
+.DS_Store
+
+# Weights belong on the network volume, never in an image.
+*.pt
+*.pth
+*.onnx
+*.safetensors
+*.bin

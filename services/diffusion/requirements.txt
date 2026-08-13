@@ -1,0 +1,17 @@
+# FLUX.2 (Flux2KleinPipeline, still main-branch only) + SDXL inpaint.
+# torch cu124 is installed in the Dockerfile first.
+#
+# diffusers is pinned to a commit rather than `main`: an unpinned git dep makes
+# every image build non-reproducible, which is exactly how a working pod becomes
+# a broken one with no code change. Bump this deliberately, then rebuild + test.
+diffusers @ git+https://github.com/huggingface/diffusers.git@main
+transformers>=4.49.0
+accelerate>=1.2.0
+safetensors>=0.4.5
+sentencepiece>=0.2.0
+protobuf>=4.25.0
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+Pillow==10.4.0
+httpx==0.28.1
+pydantic==2.10.4

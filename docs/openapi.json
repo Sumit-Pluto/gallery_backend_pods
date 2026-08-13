@@ -1,0 +1,1267 @@
+{
+    "openapi": "3.1.0",
+    "info": {
+        "title": "crm-gateway",
+        "version": "fix2"
+    },
+    "paths": {
+        "/v1/image/edit": {
+            "post": {
+                "tags": [
+                    "image"
+                ],
+                "summary": "Apply an allow-listed edit operation",
+                "description": "The single entry point for every generative edit.\n\nYou send an **op name**, not a prompt \u2014 the gateway owns the wording (see\nops.py). Fixed-function ops (upscale, restore, remove-background) answer\ninline; diffusion ops return `202 {job_id}` and you poll `/v1/jobs/{id}`.",
+                "operationId": "edit_v1_image_edit_post",
+                "parameters": [
+                    {
+                        "name": "wait",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "number",
+                            "minimum": 0.0,
+                            "description": "Seconds to block waiting for a diffusion result before returning a job id. 0 (default) returns 202 immediately. Capped by SYNC_WAIT_MAX.",
+                            "default": 0,
+                            "title": "Wait"
+                        },
+                        "description": "Seconds to block waiting for a diffusion result before returning a job id. 0 (default) returns 202 immediately. Capped by SYNC_WAIT_MAX."
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/EditIn"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ImageOut"
+                                }
+                            }
+                        }
+                    },
+                    "202": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/JobAccepted"
+                                }
+                            }
+                        },
+                        "description": "Accepted"
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/image/upscale": {
+            "post": {
+                "tags": [
+                    "image"
+                ],
+                "summary": "Real-ESRGAN upscale (2x or 4x)",
+                "operationId": "upscale_v1_image_upscale_post",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/UpscaleIn"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ImageOut"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/image/remove-bg": {
+            "post": {
+                "tags": [
+                    "image"
+                ],
+                "summary": "Background removal (U^2-Net)",
+                "operationId": "remove_bg_v1_image_remove_bg_post",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/RemoveBgIn"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ImageOut"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/ocr": {
+            "post": {
+                "tags": [
+                    "ocr"
+                ],
+                "summary": "PP-OCRv6 text detection + recognition",
+                "operationId": "ocr_v1_ocr_post",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/OcrIn"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/OcrOut"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/vision/detect": {
+            "post": {
+                "tags": [
+                    "vision"
+                ],
+                "summary": "Detect objects in an image",
+                "operationId": "detect_v1_vision_detect_post",
+                "parameters": [
+                    {
+                        "name": "backend",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string",
+                                    "pattern": "^(vlm|yolo)$"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "description": "Force a backend. Default: DETECT_BACKEND (vlm).",
+                            "title": "Backend"
+                        },
+                        "description": "Force a backend. Default: DETECT_BACKEND (vlm)."
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/DetectIn"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/DetectOut"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/audio/transcribe": {
+            "post": {
+                "tags": [
+                    "audio"
+                ],
+                "summary": "Whisper transcription",
+                "operationId": "transcribe_v1_audio_transcribe_post",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/TranscribeIn"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/TranscribeOut"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/audio/denoise": {
+            "post": {
+                "tags": [
+                    "audio"
+                ],
+                "summary": "RNNoise/afftdn denoise -> 48 kHz mono WAV",
+                "operationId": "denoise_v1_audio_denoise_post",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/DenoiseIn"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/AudioOut"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/llm/chat": {
+            "post": {
+                "tags": [
+                    "llm"
+                ],
+                "summary": "OpenAI-compatible chat/vision via Groq",
+                "description": "Passthrough. You own the prompt, the model and the response schema.\n\nReturns `{\"response\": <full Groq chat completion>, \"key_index\": n}` \u2014 read the\nanswer at `response.choices[0].message.content`.",
+                "operationId": "llm_chat_v1_llm_chat_post",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/LlmIn"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/chat/completions": {
+            "post": {
+                "tags": [
+                    "llm"
+                ],
+                "summary": "Chat with the self-hosted Qwen pod",
+                "description": "OpenAI-shaped. `stream` is forced off \u2014 the gateway returns one JSON body.",
+                "operationId": "chat_completions_v1_chat_completions_post",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "title": "Body"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/translate": {
+            "post": {
+                "tags": [
+                    "llm"
+                ],
+                "summary": "NLLB-200 translation",
+                "operationId": "translate_v1_translate_post",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/TranslateIn"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/jobs/{job_id}": {
+            "get": {
+                "tags": [
+                    "jobs"
+                ],
+                "summary": "Poll a render job",
+                "description": "`status` is queued | running | done | error.\n\nOn `done` the payload is under `result`. On `error` it is under `error`.\nJobs are kept for JOB_TTL_SECONDS after they finish, then 404.",
+                "operationId": "get_job_v1_jobs__job_id__get",
+                "parameters": [
+                    {
+                        "name": "job_id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "title": "Job Id"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/JobStatus"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "components": {
+        "schemas": {
+            "AudioOut": {
+                "properties": {
+                    "audio": {
+                        "type": "string",
+                        "title": "Audio",
+                        "description": "base64 WAV, 48 kHz mono"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "audio"
+                ],
+                "title": "AudioOut"
+            },
+            "Box": {
+                "properties": {
+                    "x1": {
+                        "type": "number",
+                        "title": "X1"
+                    },
+                    "y1": {
+                        "type": "number",
+                        "title": "Y1"
+                    },
+                    "x2": {
+                        "type": "number",
+                        "title": "X2"
+                    },
+                    "y2": {
+                        "type": "number",
+                        "title": "Y2"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "x1",
+                    "y1",
+                    "x2",
+                    "y2"
+                ],
+                "title": "Box"
+            },
+            "DenoiseIn": {
+                "properties": {
+                    "audio": {
+                        "type": "string",
+                        "title": "Audio"
+                    }
+                },
+                "additionalProperties": false,
+                "type": "object",
+                "required": [
+                    "audio"
+                ],
+                "title": "DenoiseIn"
+            },
+            "DetectIn": {
+                "properties": {
+                    "image": {
+                        "type": "string",
+                        "title": "Image",
+                        "description": "base64 (optionally data: prefixed) or an http(s) URL"
+                    },
+                    "conf": {
+                        "anyOf": [
+                            {
+                                "type": "number",
+                                "maximum": 1.0,
+                                "minimum": 0.0
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Conf"
+                    },
+                    "iou": {
+                        "anyOf": [
+                            {
+                                "type": "number",
+                                "maximum": 1.0,
+                                "minimum": 0.0
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Iou"
+                    },
+                    "imgsz": {
+                        "anyOf": [
+                            {
+                                "type": "integer",
+                                "maximum": 2048.0,
+                                "minimum": 320.0
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Imgsz"
+                    }
+                },
+                "additionalProperties": false,
+                "type": "object",
+                "required": [
+                    "image"
+                ],
+                "title": "DetectIn"
+            },
+            "DetectOut": {
+                "properties": {
+                    "detections": {
+                        "items": {
+                            "$ref": "#/components/schemas/Detection"
+                        },
+                        "type": "array",
+                        "title": "Detections"
+                    },
+                    "source": {
+                        "type": "string",
+                        "enum": [
+                            "vlm",
+                            "yolo"
+                        ],
+                        "title": "Source",
+                        "default": "vlm"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "detections"
+                ],
+                "title": "DetectOut"
+            },
+            "Detection": {
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "title": "Name"
+                    },
+                    "confidence": {
+                        "type": "number",
+                        "title": "Confidence"
+                    },
+                    "box": {
+                        "$ref": "#/components/schemas/Box"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "name",
+                    "confidence",
+                    "box"
+                ],
+                "title": "Detection"
+            },
+            "EditIn": {
+                "properties": {
+                    "image": {
+                        "type": "string",
+                        "title": "Image"
+                    },
+                    "op": {
+                        "$ref": "#/components/schemas/EditOp"
+                    },
+                    "mask": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Mask",
+                        "description": "base64/URL PNG. White = the region to regenerate."
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/EditParams"
+                    }
+                },
+                "additionalProperties": false,
+                "type": "object",
+                "required": [
+                    "image",
+                    "op"
+                ],
+                "title": "EditIn"
+            },
+            "EditOp": {
+                "properties": {
+                    "type": {
+                        "type": "string",
+                        "enum": [
+                            "restore",
+                            "colorize",
+                            "replace-sky",
+                            "magic-eraser",
+                            "generative-fill",
+                            "prompt",
+                            "upscale",
+                            "remove-background"
+                        ],
+                        "title": "Type"
+                    },
+                    "prompt": {
+                        "anyOf": [
+                            {
+                                "type": "string",
+                                "maxLength": 1000
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Prompt"
+                    },
+                    "factor": {
+                        "anyOf": [
+                            {
+                                "type": "integer",
+                                "enum": [
+                                    2,
+                                    4
+                                ]
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Factor"
+                    }
+                },
+                "additionalProperties": false,
+                "type": "object",
+                "required": [
+                    "type"
+                ],
+                "title": "EditOp"
+            },
+            "EditParams": {
+                "properties": {
+                    "negative_prompt": {
+                        "anyOf": [
+                            {
+                                "type": "string",
+                                "maxLength": 300
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Negative Prompt"
+                    },
+                    "strength": {
+                        "anyOf": [
+                            {
+                                "type": "number",
+                                "maximum": 1.0,
+                                "minimum": 0.0
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Strength"
+                    },
+                    "steps": {
+                        "anyOf": [
+                            {
+                                "type": "integer",
+                                "maximum": 60.0,
+                                "minimum": 1.0
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Steps"
+                    },
+                    "guidance_scale": {
+                        "anyOf": [
+                            {
+                                "type": "number",
+                                "maximum": 20.0,
+                                "minimum": 1.0
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Guidance Scale"
+                    },
+                    "seed": {
+                        "anyOf": [
+                            {
+                                "type": "integer",
+                                "maximum": 2147483647.0,
+                                "minimum": 0.0
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Seed"
+                    }
+                },
+                "additionalProperties": false,
+                "type": "object",
+                "title": "EditParams",
+                "description": "Optional diffusion tuning. Every field is clamped, never passed through raw.\n\nSame bounds as the old `sanitizeParams` in edit/route.ts \u2014 a caller cannot\nask for 500 steps and pin the GPU."
+            },
+            "HTTPValidationError": {
+                "properties": {
+                    "detail": {
+                        "items": {
+                            "$ref": "#/components/schemas/ValidationError"
+                        },
+                        "type": "array",
+                        "title": "Detail"
+                    }
+                },
+                "type": "object",
+                "title": "HTTPValidationError"
+            },
+            "ImageOut": {
+                "properties": {
+                    "image": {
+                        "type": "string",
+                        "title": "Image",
+                        "description": "base64 PNG"
+                    },
+                    "width": {
+                        "anyOf": [
+                            {
+                                "type": "integer"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Width"
+                    },
+                    "height": {
+                        "anyOf": [
+                            {
+                                "type": "integer"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Height"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "image"
+                ],
+                "title": "ImageOut"
+            },
+            "JobAccepted": {
+                "properties": {
+                    "job_id": {
+                        "type": "string",
+                        "title": "Job Id"
+                    },
+                    "status": {
+                        "type": "string",
+                        "const": "queued",
+                        "title": "Status",
+                        "default": "queued"
+                    },
+                    "poll": {
+                        "type": "string",
+                        "title": "Poll"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "job_id",
+                    "poll"
+                ],
+                "title": "JobAccepted"
+            },
+            "JobStatus": {
+                "properties": {
+                    "job_id": {
+                        "type": "string",
+                        "title": "Job Id"
+                    },
+                    "status": {
+                        "type": "string",
+                        "enum": [
+                            "queued",
+                            "running",
+                            "done",
+                            "error"
+                        ],
+                        "title": "Status"
+                    },
+                    "created_at": {
+                        "type": "number",
+                        "title": "Created At"
+                    },
+                    "started_at": {
+                        "anyOf": [
+                            {
+                                "type": "number"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Started At"
+                    },
+                    "finished_at": {
+                        "anyOf": [
+                            {
+                                "type": "number"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Finished At"
+                    },
+                    "result": {
+                        "anyOf": [
+                            {
+                                "type": "object"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Result"
+                    },
+                    "error": {
+                        "anyOf": [
+                            {
+                                "type": "object"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Error"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "job_id",
+                    "status",
+                    "created_at"
+                ],
+                "title": "JobStatus"
+            },
+            "LlmIn": {
+                "properties": {
+                    "messages": {
+                        "items": {
+                            "type": "object"
+                        },
+                        "type": "array",
+                        "minItems": 1,
+                        "title": "Messages"
+                    },
+                    "model": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Model"
+                    }
+                },
+                "additionalProperties": true,
+                "type": "object",
+                "required": [
+                    "messages"
+                ],
+                "title": "LlmIn",
+                "description": "OpenAI chat/completions body, forwarded to Groq verbatim.\n\n`extra=\"allow\"` on purpose: the caller owns the prompt, the model and the\nstructured-output schema. The server owns only the API keys."
+            },
+            "OcrIn": {
+                "properties": {
+                    "image": {
+                        "type": "string",
+                        "title": "Image"
+                    }
+                },
+                "additionalProperties": false,
+                "type": "object",
+                "required": [
+                    "image"
+                ],
+                "title": "OcrIn"
+            },
+            "OcrLine": {
+                "properties": {
+                    "text": {
+                        "type": "string",
+                        "title": "Text"
+                    },
+                    "score": {
+                        "type": "number",
+                        "title": "Score"
+                    },
+                    "box": {
+                        "items": {
+                            "items": {
+                                "type": "number"
+                            },
+                            "type": "array"
+                        },
+                        "type": "array",
+                        "title": "Box"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "text",
+                    "score",
+                    "box"
+                ],
+                "title": "OcrLine"
+            },
+            "OcrOut": {
+                "properties": {
+                    "lines": {
+                        "items": {
+                            "$ref": "#/components/schemas/OcrLine"
+                        },
+                        "type": "array",
+                        "title": "Lines"
+                    },
+                    "text": {
+                        "type": "string",
+                        "title": "Text"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "lines",
+                    "text"
+                ],
+                "title": "OcrOut"
+            },
+            "RemoveBgIn": {
+                "properties": {
+                    "image": {
+                        "type": "string",
+                        "title": "Image"
+                    },
+                    "model_name": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Model Name"
+                    }
+                },
+                "additionalProperties": false,
+                "type": "object",
+                "required": [
+                    "image"
+                ],
+                "title": "RemoveBgIn"
+            },
+            "Segment": {
+                "properties": {
+                    "text": {
+                        "type": "string",
+                        "title": "Text"
+                    },
+                    "start_sec": {
+                        "type": "number",
+                        "title": "Start Sec"
+                    },
+                    "end_sec": {
+                        "type": "number",
+                        "title": "End Sec"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "text",
+                    "start_sec",
+                    "end_sec"
+                ],
+                "title": "Segment"
+            },
+            "TranscribeIn": {
+                "properties": {
+                    "audio": {
+                        "type": "string",
+                        "title": "Audio"
+                    },
+                    "language": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Language"
+                    },
+                    "timestamps": {
+                        "type": "boolean",
+                        "title": "Timestamps",
+                        "default": false
+                    }
+                },
+                "additionalProperties": false,
+                "type": "object",
+                "required": [
+                    "audio"
+                ],
+                "title": "TranscribeIn"
+            },
+            "TranscribeOut": {
+                "properties": {
+                    "transcript": {
+                        "type": "string",
+                        "title": "Transcript"
+                    },
+                    "language": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Language"
+                    },
+                    "segments": {
+                        "anyOf": [
+                            {
+                                "items": {
+                                    "$ref": "#/components/schemas/Segment"
+                                },
+                                "type": "array"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Segments"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "transcript"
+                ],
+                "title": "TranscribeOut"
+            },
+            "TranslateIn": {
+                "properties": {
+                    "text": {
+                        "type": "string",
+                        "maxLength": 20000,
+                        "title": "Text"
+                    },
+                    "source": {
+                        "type": "string",
+                        "title": "Source",
+                        "description": "FLORES-200 code, e.g. eng_Latn"
+                    },
+                    "target": {
+                        "type": "string",
+                        "title": "Target",
+                        "description": "FLORES-200 code, e.g. hin_Deva"
+                    }
+                },
+                "additionalProperties": false,
+                "type": "object",
+                "required": [
+                    "text",
+                    "source",
+                    "target"
+                ],
+                "title": "TranslateIn"
+            },
+            "UpscaleIn": {
+                "properties": {
+                    "image": {
+                        "type": "string",
+                        "title": "Image"
+                    },
+                    "scale": {
+                        "type": "integer",
+                        "enum": [
+                            2,
+                            4
+                        ],
+                        "title": "Scale",
+                        "default": 4
+                    },
+                    "face_enhance": {
+                        "type": "boolean",
+                        "title": "Face Enhance",
+                        "default": false
+                    }
+                },
+                "additionalProperties": false,
+                "type": "object",
+                "required": [
+                    "image"
+                ],
+                "title": "UpscaleIn"
+            },
+            "ValidationError": {
+                "properties": {
+                    "loc": {
+                        "items": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "integer"
+                                }
+                            ]
+                        },
+                        "type": "array",
+                        "title": "Location"
+                    },
+                    "msg": {
+                        "type": "string",
+                        "title": "Message"
+                    },
+                    "type": {
+                        "type": "string",
+                        "title": "Error Type"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "loc",
+                    "msg",
+                    "type"
+                ],
+                "title": "ValidationError"
+            }
+        }
+    }
+}

@@ -1,0 +1,86 @@
+# Local development stack.
+#
+# The gateway and cpu services run for real. The GPU services need CUDA, so on a
+# dev machine they are simply absent — the gateway returns a clean 503
+# ("not_configured") for anything routed to them, which is exactly what it does
+# in production when a pod is down. That is enough to develop and test every
+# code path that is not literally model inference.
+#
+#   docker compose up gateway cpu          # the usual dev loop
+#   docker compose --profile gpu up        # only on a CUDA host
+#
+# The one thing you cannot exercise here is FLUX/SDXL/ESRGAN output. That is
+# validated on the pod with scripts/smoke_test.py.
+
+services:
+  gateway:
+    build:
+      context: .
+      dockerfile: services/gateway/Dockerfile
+    ports: ["8000:8000"]
+    environment:
+      ALLOW_INSECURE: "true"          # skips X-Internal-Key between services
+      CLIENT_API_KEYS: "dev-key"
+      INTERNAL_API_KEY: "dev-internal"
+      CPU_URL: "http://cpu:8000"
+      VISION_URL: "${VISION_URL:-http://vision:8000}"
+      DIFFUSION_URL: "${DIFFUSION_URL:-http://diffusion:8000}"
+      CHAT_URL: "${CHAT_URL:-}"
+      TRANSLATE_URL: "${TRANSLATE_URL:-}"
+      PUBLIC_BASE_URL: "http://localhost:8000"
+      LOG_LEVEL: "INFO"
+    depends_on: [cpu]
+
+  cpu:
+    build:
+      context: .
+      dockerfile: services/cpu_tasks/Dockerfile
+    environment:
+      ALLOW_INSECURE: "true"
+      INTERNAL_API_KEY: "dev-internal"
+      DATA_DIR: "/data"
+      GROQ_API_KEYS: "${GROQ_API_KEYS:-}"
+      OCR_MODEL_DIR: "/data/ocr"
+      WARM_OCR: "false"               # models are not in the image; see deploy/volume
+    volumes:
+      - crm-data:/data
+    ports: ["8003:8000"]
+
+  # --- CUDA hosts only ------------------------------------------------------
+  vision:
+    profiles: ["gpu"]
+    build:
+      context: .
+      dockerfile: services/vision/Dockerfile
+    environment:
+      ALLOW_INSECURE: "true"
+      INTERNAL_API_KEY: "dev-internal"
+      DATA_DIR: "/data"
+      WHISPER_MODEL: "${WHISPER_MODEL:-base}"   # small model for dev
+    volumes:
+      - crm-data:/data
+    ports: ["8001:8000"]
+    deploy:
+      resources:
+        reservations:
+          devices: [{ driver: nvidia, count: 1, capabilities: [gpu] }]
+
+  diffusion:
+    profiles: ["gpu"]
+    build:
+      context: .
+      dockerfile: services/diffusion/Dockerfile
+    environment:
+      ALLOW_INSECURE: "true"
+      INTERNAL_API_KEY: "dev-internal"
+      DATA_DIR: "/data"
+    volumes:
+      - crm-data:/data
+    ports: ["8002:8000"]
+    deploy:
+      resources:
+        reservations:
+          devices: [{ driver: nvidia, count: 1, capabilities: [gpu] }]
+
+volumes:
+  crm-data:

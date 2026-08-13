@@ -1,0 +1,142 @@
+name: build
+
+# Path-filtered matrix: pushing a diffusion change builds ONLY crm-diffusion.
+# This is half of the modularity story — the other half is CODE_REF in
+# deploy/entrypoint.sh, which lets a code-only change skip the build entirely.
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      service:
+        description: "Force-build one service (or 'all')"
+        required: false
+        default: all
+        type: choice
+        options: [all, gateway, vision, diffusion, cpu_tasks]
+
+env:
+  REGISTRY: ghcr.io
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # --------------------------------------------------------------------- #
+  # Gate: what actually changed?
+  # --------------------------------------------------------------------- #
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      gateway: ${{ steps.filter.outputs.gateway }}
+      vision: ${{ steps.filter.outputs.vision }}
+      diffusion: ${{ steps.filter.outputs.diffusion }}
+      cpu_tasks: ${{ steps.filter.outputs.cpu_tasks }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            common: &common
+              - 'libs/common/**'
+              - 'deploy/entrypoint.sh'
+              - '.github/workflows/build.yml'
+            gateway:
+              - *common
+              - 'services/gateway/**'
+            vision:
+              - *common
+              - 'services/vision/**'
+            diffusion:
+              - *common
+              - 'services/diffusion/**'
+            cpu_tasks:
+              - *common
+              - 'services/cpu_tasks/**'
+
+  # --------------------------------------------------------------------- #
+  # Tests gate the images. A red test never becomes a :prod tag.
+  # --------------------------------------------------------------------- #
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r services/gateway/requirements.txt pytest
+      - run: pip install ./libs/common
+      - run: pytest tests/ -q
+
+  # --------------------------------------------------------------------- #
+  # Build + push only what changed.
+  # --------------------------------------------------------------------- #
+  build:
+    needs: [changes, test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [gateway, vision, diffusion, cpu_tasks]
+    steps:
+      - name: Should this service build?
+        id: gate
+        run: |
+          FORCED="${{ github.event.inputs.service }}"
+          CHANGED="${{ needs.changes.outputs[matrix.service] }}"
+          if [ "$FORCED" = "${{ matrix.service }}" ] || [ "$FORCED" = "all" ] && [ -n "$FORCED" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          elif [ "$CHANGED" = "true" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::${{ matrix.service }} unchanged — skipping build"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.gate.outputs.run == 'true'
+
+      - uses: docker/setup-buildx-action@v3
+        if: steps.gate.outputs.run == 'true'
+
+      - uses: docker/login-action@v3
+        if: steps.gate.outputs.run == 'true'
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        if: steps.gate.outputs.run == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: services/${{ matrix.service }}/Dockerfile
+          # RunPod runs x86. Never let a build host's arch leak into the tag.
+          platforms: linux/amd64
+          push: ${{ github.event_name != 'pull_request' }}
+          build-args: BUILD_SHA=${{ github.sha }}
+          # SHA tag is the rollback handle; :prod is what the pods point at.
+          # Never deploy :latest — you cannot roll back to a moving tag.
+          tags: |
+            ${{ env.REGISTRY }}/${{ github.repository }}/crm-${{ matrix.service }}:${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ github.repository }}/crm-${{ matrix.service }}:prod
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+
+      - name: Summary
+        if: steps.gate.outputs.run == 'true'
+        run: |
+          echo "### crm-${{ matrix.service }}" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "${{ env.REGISTRY }}/${{ github.repository }}/crm-${{ matrix.service }}:${{ github.sha }}" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
