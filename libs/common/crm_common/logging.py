@@ -61,10 +61,22 @@ def setup_logging(service: str) -> logging.Logger:
 
     # uvicorn installs its own colourised handlers; force them through ours so
     # the pod's stdout is a single parseable stream.
-    for name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
+    for name in ("uvicorn", "uvicorn.error"):
         lg = logging.getLogger(name)
         lg.handlers = []
         lg.propagate = True
+
+    # Silence uvicorn's access log outright. Our own middleware already logs
+    # every request with the request id, status and duration, so letting this
+    # through doubles log volume for strictly less information.
+    #
+    # This has to be done here rather than with uvicorn's --no-access-log:
+    # uvicorn configures logging before importing the app, so setup_logging()
+    # runs afterwards and would otherwise re-enable propagation.
+    access = logging.getLogger("uvicorn.access")
+    access.handlers = []
+    access.propagate = False
+    access.disabled = True
 
     return logging.getLogger(service)
 

@@ -33,6 +33,10 @@ from .security import env_keys, key_matches
 
 MAX_BODY_BYTES = int(os.environ.get("MAX_BODY_BYTES", str(32 * 1024 * 1024)))
 ALLOW_INSECURE = os.environ.get("ALLOW_INSECURE", "false").lower() == "true"
+# Generous: the diffusion pod legitimately needs ~30 min on its very first boot
+# to pull FLUX + SDXL onto an empty volume. Anything past this is a real fault.
+WARMUP_TIMEOUT = float(os.environ.get("WARMUP_TIMEOUT", "2700"))
+WARMUP_HEARTBEAT = float(os.environ.get("WARMUP_HEARTBEAT", "30"))
 
 
 class Readiness:
@@ -96,14 +100,38 @@ def create_app(
         if warmup is not None:
             # Warm as a task, not inline: the port binds immediately so /healthz
             # answers while a 16 GB model set streams off the network volume.
+            async def heartbeat():
+                # Without this, a stalled warmup and a slow warmup look identical
+                # from outside: /readyz says {ready: false, error: null} either
+                # way. The heartbeat turns "is it hung?" into a log line.
+                while True:
+                    await asyncio.sleep(WARMUP_HEARTBEAT)
+                    log.info(
+                        "warmup still running",
+                        extra={"elapsed_s": round(time.time() - readiness.started_at, 1),
+                               "timeout_s": WARMUP_TIMEOUT},
+                    )
+
             async def runner():
+                beat = asyncio.create_task(heartbeat())
                 try:
-                    log.info("warmup started")
-                    await warmup()
+                    log.info("warmup started", extra={"timeout_s": WARMUP_TIMEOUT})
+                    await asyncio.wait_for(warmup(), timeout=WARMUP_TIMEOUT)
                     log.info("warmup complete", extra=readiness.snapshot())
+                except asyncio.TimeoutError:
+                    # Fail loudly rather than sitting at "not ready" forever. The
+                    # gateway then reports this pod as degraded instead of the
+                    # client seeing indefinite 503s with no explanation.
+                    readiness.mark_failed(
+                        f"warmup exceeded {WARMUP_TIMEOUT}s — likely a stalled model "
+                        "download or a cold JIT cache. Check this pod's logs."
+                    )
+                    log.error("warmup timed out", extra={"timeout_s": WARMUP_TIMEOUT})
                 except Exception as exc:
                     readiness.mark_failed(f"{type(exc).__name__}: {exc}")
                     log.exception("warmup failed")
+                finally:
+                    beat.cancel()
 
             task = asyncio.create_task(runner())
         if on_startup is not None:
