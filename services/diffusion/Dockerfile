@@ -20,8 +20,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
+# --extra-index-url, NOT --index-url. `--index-url` REPLACES PyPI, and the
+# PyTorch cu124 index does not carry every wheel torch depends on: it serves
+# nvidia-cudnn-cu12 only from 9.21 upward, while torch 2.4-2.6+cu124 pins
+# ==9.1.0.70, which lives on PyPI. With PyPI cut off, pip backtracked through
+# five torch versions (~4 GB of downloads) and died on ResolutionImpossible.
+#
+# The version is pinned for the same reason it is everywhere else here: an
+# unpinned torch lets a new release change what this image contains with no
+# commit of ours, and it is what let pip start that backtracking storm at all.
 RUN pip install --upgrade pip && \
-    pip install torch --index-url https://download.pytorch.org/whl/cu124
+    pip install torch==2.6.0+cu124 \
+        --extra-index-url https://download.pytorch.org/whl/cu124
 
 COPY services/diffusion/requirements.txt .
 RUN pip install -r requirements.txt

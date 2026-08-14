@@ -1,10 +1,14 @@
 # FLUX.2 (Flux2KleinPipeline, still main-branch only) + SDXL inpaint.
 # torch cu124 is installed in the Dockerfile first.
 #
-# diffusers is pinned to a commit rather than `main`: an unpinned git dep makes
-# every image build non-reproducible, which is exactly how a working pod becomes
-# a broken one with no code change. Bump this deliberately, then rebuild + test.
-diffusers @ git+https://github.com/huggingface/diffusers.git@main
+# Pinned to a COMMIT, not `main`. An unpinned git dep means a rebuild months from
+# now installs different code than the pod is running today — that is how a
+# working pod becomes a broken one with no commit of yours in between.
+#
+# This SHA was verified to contain src/diffusers/pipelines/flux2/pipeline_flux2_klein.py
+# and to export Flux2KleinPipeline from the package root. To move it: bump the
+# SHA, rebuild, and confirm the diffusion pod reaches /readyz before deploying.
+diffusers @ git+https://github.com/huggingface/diffusers.git@90b4e34e79a86ec5e7f2437634fe95ecd2108796
 transformers>=4.49.0
 accelerate>=1.2.0
 safetensors>=0.4.5
