@@ -1,6 +1,6 @@
 SERVICES := gateway vision diffusion cpu_tasks
 REGISTRY ?= ghcr.io
-REPO     ?= your-org/crm-ai-backend
+REPO     ?= sumit-pluto/gallery_backend_pods
 SHA      := $(shell git rev-parse --short HEAD 2>/dev/null || echo dev)
 
 .PHONY: help test lint dev logs build build-% push-% smoke clean

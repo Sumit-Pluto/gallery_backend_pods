@@ -105,6 +105,13 @@ jobs:
       - uses: actions/checkout@v4
         if: steps.gate.outputs.run == 'true'
 
+      - name: Lowercase the image repository
+        if: steps.gate.outputs.run == 'true'
+        # GHCR (and the OCI spec) reject uppercase in a repository name, but
+        # github.repository preserves the owner's casing — "Sumit-Pluto/..."
+        # would fail with "invalid reference format". Fold it to lowercase.
+        run: echo "IMAGE_REPO=${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+
       - uses: docker/setup-buildx-action@v3
         if: steps.gate.outputs.run == 'true'
 
@@ -128,8 +135,8 @@ jobs:
           # SHA tag is the rollback handle; :prod is what the pods point at.
           # Never deploy :latest — you cannot roll back to a moving tag.
           tags: |
-            ${{ env.REGISTRY }}/${{ github.repository }}/crm-${{ matrix.service }}:${{ github.sha }}
-            ${{ env.REGISTRY }}/${{ github.repository }}/crm-${{ matrix.service }}:prod
+            ${{ env.REGISTRY }}/${{ env.IMAGE_REPO }}/crm-${{ matrix.service }}:${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_REPO }}/crm-${{ matrix.service }}:prod
           cache-from: type=gha,scope=${{ matrix.service }}
           cache-to: type=gha,mode=max,scope=${{ matrix.service }}
 
@@ -137,6 +144,7 @@ jobs:
         if: steps.gate.outputs.run == 'true'
         run: |
           echo "### crm-${{ matrix.service }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Point the pod at this tag (never \`:latest\` — it cannot be rolled back):" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
-          echo "${{ env.REGISTRY }}/${{ github.repository }}/crm-${{ matrix.service }}:${{ github.sha }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "${{ env.REGISTRY }}/${{ env.IMAGE_REPO }}/crm-${{ matrix.service }}:${{ github.sha }}" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"

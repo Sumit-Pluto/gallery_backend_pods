@@ -58,7 +58,7 @@ proprietary — every secret arrives as an env var.
 
 Pods → Deploy → pick the GPU (or CPU) → **Edit Template**:
 
-- **Container Image** — the full `ghcr.io/<org>/crm-ai-backend/crm-<service>:<sha>` tag.
+- **Container Image** — the full `ghcr.io/sumit-pluto/gallery_backend_pods/crm-<service>:<sha>` tag.
   Pin the SHA, never `:latest`. A moving tag cannot be rolled back.
 - **Container Disk** — per the table above.
 - **Network Volume** — attach the one from step 1, mount path `/workspace`.
@@ -164,7 +164,7 @@ switch then costs 15–30 s but the pod never OOMs. Pinning beats `auto` because
 Set on any pod to pull Python from GitHub at boot instead of rebuilding the image:
 
 ```
-CODE_REPO=https://x-access-token:<github-pat>@github.com/<org>/crm-ai-backend.git
+CODE_REPO=https://x-access-token:<github-pat>@github.com/Sumit-Pluto/gallery_backend_pods.git
 CODE_REF=main
 ```
 

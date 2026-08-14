@@ -16,8 +16,8 @@
 #
 # Env:
 #   SERVICE      gateway | vision | diffusion | cpu_tasks   (set in the Dockerfile)
-#   CODE_REPO    https://github.com/<org>/crm-ai-backend.git
-#                private repo: https://x-access-token:<PAT>@github.com/<org>/...
+#   CODE_REPO    https://github.com/Sumit-Pluto/gallery_backend_pods.git
+#                private repo: https://x-access-token:<PAT>@github.com/Sumit-Pluto/gallery_backend_pods.git
 #   CODE_REF     branch, tag or commit SHA. Unset = use baked code (the default).
 #   PORT         defaults to 8000
 #   WEB_CONCURRENCY  uvicorn workers. Keep at 1 for GPU services.
