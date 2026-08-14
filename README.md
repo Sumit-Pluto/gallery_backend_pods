@@ -82,19 +82,16 @@ is exercisable on a laptop.
 
 ## Deploying
 
-1. Create the network volume — [`deploy/volume/README.md`](deploy/volume/README.md)
-2. Create the four pods — [`deploy/pods/README.md`](deploy/pods/README.md)
-3. Verify:
-   ```bash
-   python scripts/smoke_test.py --base-url https://<gateway>.proxy.runpod.net \
-                                --api-key <key> --concurrency 10
-   ```
-   `--concurrency 10` proves the GPU semaphore serialises work instead of OOMing.
-   Do not skip it.
-4. Hand over `CRM_AI_BASE_URL`, `CRM_AI_API_KEY`, and
-   [`docs/API.md`](docs/API.md).
+**Follow [`docs/DEPLOY.md`](docs/DEPLOY.md)** — the ordered, step-by-step runbook
+from an empty RunPod account to a URL you hand the client, with a verification
+after every step. Budget 3–4 hours, about an hour of it unattended downloading.
 
-When it breaks: [`docs/RUNBOOK.md`](docs/RUNBOOK.md).
+Reference material it links to: [`deploy/volume/README.md`](deploy/volume/README.md)
+(what lives on the volume), [`deploy/pods/README.md`](deploy/pods/README.md)
+(per-pod settings), [`docs/ENV.md`](docs/ENV.md) (every variable and what it
+costs you to get wrong).
+
+When it breaks: [`docs/RUNBOOK.md`](docs/RUNBOOK.md) — symptom → cause → fix.
 
 ## Design decisions worth knowing before you change something
 
