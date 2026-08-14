@@ -70,7 +70,10 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-      - run: pip install -r services/gateway/requirements.txt pytest
+      # Pinned, like everything else that can change under you between runs.
+      # An unpinned `pytest` means a release can turn a green pipeline red with
+      # no commit of yours involved.
+      - run: pip install -r services/gateway/requirements.txt "pytest==8.4.2"
       - run: pip install ./libs/common
       - run: pytest tests/ -q
 

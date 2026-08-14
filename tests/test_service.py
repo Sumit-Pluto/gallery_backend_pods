@@ -10,12 +10,32 @@ pod that is merely slow. A stalled pod must be able to say so.
 from __future__ import annotations
 
 import asyncio
+import time
 
 import pytest
 from fastapi.testclient import TestClient
 
 from crm_common import service
 from crm_common.service import Readiness, create_app
+
+
+def wait_for(client, predicate, *, timeout: float = 5.0, interval: float = 0.05):
+    """Poll /readyz until `predicate(body)` holds, or give up after `timeout`.
+
+    Deliberately wall-clock bounded rather than a fixed iteration count. An
+    earlier version spun N times with no delay, which passed locally and failed
+    in CI: with uvloop installed the polls completed faster than the warmup
+    timeout being tested, so the condition had not had time to occur yet. Any
+    "loop N times and hope" assertion is a race waiting for a faster machine.
+    """
+    deadline = time.monotonic() + timeout
+    body = None
+    while time.monotonic() < deadline:
+        body = client.get("/readyz").json()
+        if predicate(body):
+            return body
+        time.sleep(interval)
+    return body
 
 
 def test_healthz_is_up_before_readyz():
@@ -41,10 +61,7 @@ def test_readyz_reports_200_once_warm():
 
     app = create_app("test-warm", readiness=readiness, warmup=warmup, internal_auth=False)
     with TestClient(app) as client:
-        for _ in range(50):
-            if client.get("/readyz").status_code == 200:
-                break
-        body = client.get("/readyz").json()
+        body = wait_for(client, lambda b: b.get("ready") is True)
     assert body["ready"] is True
     assert body["loaded"] == ["thing"]
     assert body["warmup_s"] is not None
@@ -61,11 +78,8 @@ def test_a_hung_warmup_eventually_reports_an_error(monkeypatch):
 
     app = create_app("test-hung", readiness=readiness, warmup=never_finishes, internal_auth=False)
     with TestClient(app) as client:
-        body = None
-        for _ in range(60):
-            body = client.get("/readyz").json()
-            if body.get("error"):
-                break
+        # Must outlast WARMUP_TIMEOUT above, with room for a slow runner.
+        body = wait_for(client, lambda b: b.get("error"), timeout=10.0)
     assert body["ready"] is False
     assert body["error"] is not None, "a hung warmup must surface an error, not sit at error=null"
     assert "exceeded" in body["error"]
@@ -79,11 +93,7 @@ def test_a_failing_warmup_surfaces_the_exception():
 
     app = create_app("test-broken", readiness=readiness, warmup=broken, internal_auth=False)
     with TestClient(app) as client:
-        body = None
-        for _ in range(50):
-            body = client.get("/readyz").json()
-            if body.get("error"):
-                break
+        body = wait_for(client, lambda b: b.get("error"))
     assert body["error"] == "RuntimeError: model file is corrupt"
 
 
