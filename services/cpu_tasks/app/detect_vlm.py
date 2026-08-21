@@ -33,7 +33,7 @@ import json
 import logging
 import re
 
-from crm_common import media
+from crm_common import media, pool
 from crm_common.errors import ApiError, BadRequest, UpstreamError
 from crm_common.schemas import DetectOut
 
@@ -221,8 +221,25 @@ async def _ask(data_url: str) -> dict:
         return await llm_proxy.chat(_body(data_url, strict=False), model_kind="vision", task="detect")
 
 
+# Process-wide, NOT per-request. A semaphore constructed inside the request
+# handler bounds one batch and nothing else: ten concurrent batches would each
+# get their own allowance of 8 and put 80 calls in flight, which is precisely the
+# rate-limit stampede the bound exists to prevent. On a pod — one long-lived
+# process serving every user — the only meaningful scope is the process.
+_batch_semaphore: asyncio.Semaphore | None = None
+
+
+def _batch_slot() -> asyncio.Semaphore:
+    global _batch_semaphore
+    if _batch_semaphore is None:
+        # Lazily: a Semaphore binds to the running loop, which does not exist at
+        # import time.
+        _batch_semaphore = asyncio.Semaphore(max(1, config.DETECT_BATCH_CONCURRENCY))
+    return _batch_semaphore
+
+
 async def detect(payload: dict) -> dict:
-    data_url, width, height = await asyncio.to_thread(_prepare, payload["image"])
+    data_url, width, height = await pool.PREP.run(_prepare, payload["image"])
     result = await _ask(data_url)
 
     items = _parse(_content(result))
@@ -265,10 +282,9 @@ async def detect_batch(payload: dict) -> dict:
         )
 
     conf = payload.get("conf")
-    semaphore = asyncio.Semaphore(max(1, config.DETECT_BATCH_CONCURRENCY))
 
     async def one(index: int, image: str) -> dict:
-        async with semaphore:
+        async with _batch_slot():
             try:
                 result = await detect({"image": image, **({"conf": conf} if conf is not None else {})})
             except ApiError as exc:

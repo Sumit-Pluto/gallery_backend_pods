@@ -29,11 +29,17 @@ from crm_common.schemas import (
     OcrOut,
     RemoveBgIn,
 )
+from crm_common import pool
 from crm_common.service import Readiness, create_app, require_ready
 
 from . import detect_vlm, llm_proxy, tasks
 
 readiness = Readiness()
+
+
+async def _shutdown() -> None:
+    await llm_proxy.aclose()
+    pool.shutdown()
 
 
 async def warmup() -> None:
@@ -50,27 +56,28 @@ app = create_app(
         "ocr": tasks.ocr_available(),
         "llm_providers": config.provider_names(),
         "llm_configured": llm_proxy.configured(),
+        "pools": pool.stats(),
     },
-    on_shutdown=llm_proxy.aclose,
+    on_shutdown=_shutdown,
 )
 
 
 @app.post("/remove-bg", response_model=ImageOut)
 async def remove_bg(req: RemoveBgIn):
     require_ready(readiness)
-    return await asyncio.to_thread(tasks.remove_bg, req.model_dump(exclude_none=True))
+    return await pool.HEAVY.run(tasks.remove_bg, req.model_dump(exclude_none=True))
 
 
 @app.post("/denoise", response_model=AudioOut)
 async def denoise(req: DenoiseIn):
     require_ready(readiness)
-    return await asyncio.to_thread(tasks.denoise, req.model_dump())
+    return await pool.HEAVY.run(tasks.denoise, req.model_dump())
 
 
 @app.post("/ocr", response_model=OcrOut)
 async def ocr(req: OcrIn):
     require_ready(readiness)
-    return await asyncio.to_thread(tasks.ocr, req.model_dump())
+    return await pool.HEAVY.run(tasks.ocr, req.model_dump())
 
 
 @app.post("/detect", response_model=DetectOut)
