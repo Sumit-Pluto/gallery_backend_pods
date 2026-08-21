@@ -108,13 +108,32 @@ GROQ = Provider(
     timeout=float(os.environ.get("GROQ_TIMEOUT", "120")),
 )
 
-_REGISTRY = {p.name: p for p in (DASHSCOPE, GROQ)}
+# OpenRouter. A router rather than a first-party host: it fronts many upstreams
+# behind one OpenAI-compatible surface, so it is the easiest provider to get
+# billing for and the one most likely to still answer when a single vendor is
+# having a bad day. You pay a small routing margin for that.
+OPENROUTER = Provider(
+    name="openrouter",
+    base_url=os.environ.get("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1").rstrip("/"),
+    keys_env=("OPENROUTER_API_KEYS", "OPENROUTER_API_KEY"),
+    model=os.environ.get("OPENROUTER_MODEL", "qwen/qwen3.7-flash"),
+    vision_model=os.environ.get("OPENROUTER_VISION_MODEL", "qwen/qwen3.7-flash"),
+    timeout=float(os.environ.get("OPENROUTER_TIMEOUT", "120")),
+    # OpenRouter attributes traffic with these; harmless elsewhere, and they are
+    # how you show up in their dashboards rather than as anonymous volume.
+    extra_headers={
+        "HTTP-Referer": os.environ.get("OPENROUTER_SITE_URL", "https://github.com/Sumit-Pluto/gallery_backend_pods"),
+        "X-Title": os.environ.get("OPENROUTER_APP_NAME", "crm-ai-backend"),
+    },
+)
+
+_REGISTRY = {p.name: p for p in (DASHSCOPE, GROQ, OPENROUTER)}
 
 # Ordered failover chain. Model Studio first: first-party Qwen, production
 # status, cheaper per token, and limits you can raise on a paid account.
 LLM_PROVIDER_ORDER = [
     name.strip().lower()
-    for name in os.environ.get("LLM_PROVIDERS", "dashscope,groq").split(",")
+    for name in os.environ.get("LLM_PROVIDERS", "openrouter,dashscope,groq").split(",")
     if name.strip()
 ]
 

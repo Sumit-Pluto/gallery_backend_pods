@@ -149,13 +149,25 @@ Use **On-Demand / Secure Cloud**, never Spot.
 ```
 INTERNAL_API_KEY=<shared secret>
 DATA_DIR=/workspace
-GROQ_API_KEYS=<key1>,<key2>,<key3>
-GROQ_MODEL=qwen/qwen3.6-27b
+# Providers are tried in order; the chain advances when one is down or every
+# key of it is throttled. You need at least one. OpenRouter is the quickest to
+# get billing for; Model Studio is cheapest once its account is activated.
+LLM_PROVIDERS=openrouter,dashscope,groq
+
+OPENROUTER_API_KEYS=<key>
+OPENROUTER_VISION_MODEL=qwen/qwen3.7-flash
+
+DASHSCOPE_API_KEYS=<key>
+DASHSCOPE_VISION_MODEL=qwen3-vl-flash
+
+GROQ_API_KEYS=<key1>,<key2>
 GROQ_VISION_MODEL=qwen/qwen3.6-27b
 OCR_MODEL_DIR=/workspace/ocr
 ```
 
-`GROQ_API_KEYS` is comma-separated and rotates automatically on 429 — more keys
+Each provider's keys are comma-separated and rotate automatically on 429. Note
+that Groq's limits are **per organisation**, so extra Groq keys on one account
+buy no headroom — only a second *provider* does. More keys
 means more headroom. This pod serves object detection (via the Qwen vision
 model), so an empty value here disables detection *and* the LLM endpoint.
 
@@ -254,7 +266,15 @@ TRANSLATE_URL=https://<chat-pod-id>-8000.proxy.runpod.net
 CHAT_POD_KEY=<only if your chat pod sets one>
 PUBLIC_BASE_URL=https://<gateway-pod-id>-8000.proxy.runpod.net
 DETECT_BACKEND=vlm
-DETECT_FALLBACK_TO_YOLO=true
+# Off by default: YOLO cannot produce the open-vocabulary labels the gallery
+# indexes, and it shares the vision pod's single GPU slot with upscale.
+DETECT_FALLBACK_TO_YOLO=false
+
+# Must match the GPU's real capacity: one diffusion pod at GPU_CONCURRENCY=1
+# means 1. This is what keeps the queue in the gateway (where a caller can be
+# told their position) instead of at the pod's semaphore (where they wait blind).
+JOB_DISPATCH_CONCURRENCY=1
+JOB_MAX_QUEUED=12
 RATE_LIMIT_PER_MINUTE=120
 ```
 
@@ -392,7 +412,8 @@ Ordered by how likely they are.
 | `503 not_configured` | Gateway does not know that pod's URL | Set `VISION_URL` / `DIFFUSION_URL` / `CPU_URL`. Also what you see after recreating a pod — new id, new URL. |
 | `503 not_ready` for ages | Still loading | Normal for 1–2 min; ~30 min on diffusion's first boot. Check the pod log for `warmup complete`. |
 | CUDA OOM | `GPU_CONCURRENCY > 1`, or `ESRGAN_TILE=0` on 16 GB, or FLUX+SDXL both resident on too small a card | Set concurrency to 1, tile to 400, `RESIDENCY=swap`. |
-| Detection boxes suddenly loose | `source` flipped from `vlm` to `yolo` — all Groq keys rate-limited | Add another key to `GROQ_API_KEYS`. |
+| Detection labels get narrower | `source` flipped to `yolo` (only if you enabled the fallback) | Check `provider` in the response and `/v1/status`. Add a provider to `LLM_PROVIDERS` rather than more keys to one. |
+| `queue_full` under load | More renders submitted than one GPU can drain | Expected: it now rejects fast with `retry_after_s` instead of timing out at 5 min. Add a diffusion pod and raise `JOB_DISPATCH_CONCURRENCY`. |
 | Job ids 404 right after a 202 | Gateway restarted between submit and poll | Job state is in-process by design. Client retries. If frequent, the gateway is crash-looping — read its log. |
 | Pod will not start, `unauthorized` | GHCR credentials | Fix registry auth, or make the packages public. |
 

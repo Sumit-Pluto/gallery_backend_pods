@@ -51,6 +51,26 @@ def authenticate(request: Request) -> str:
     return key_fingerprint(presented)
 
 
+def fair_key(request: Request, fingerprint: str) -> str:
+    """Rate-limit / queue bucket: the end user behind the shared API key.
+
+    The client's backend holds one key for all of its users, so bucketing purely
+    by key means one person's bulk upload throttles everybody. When the caller
+    names the end user we give them their own bucket.
+
+    This is a FAIRNESS signal only, never an authorisation one — `fingerprint`
+    still decides what you may read. A forged or absent header therefore costs
+    nothing worse than sharing a bucket, which is exactly where we started.
+    """
+    raw = request.headers.get(config.END_USER_HEADER)
+    if not raw:
+        return fingerprint
+    # Hash it: end-user ids are the client's data and have no business in our
+    # logs or metrics. Truncated because this only needs to be distinct, and
+    # bounded so a caller cannot grow the bucket dict with huge headers.
+    return f"{fingerprint}:{key_fingerprint(raw.strip()[:200])[:8]}"
+
+
 def check_rate_limit(fingerprint: str) -> None:
     """Token bucket: RATE_LIMIT_PER_MINUTE sustained, RATE_LIMIT_BURST instantaneous."""
     rate_per_second = config.RATE_LIMIT_PER_MINUTE / 60.0

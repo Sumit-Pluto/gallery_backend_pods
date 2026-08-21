@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse
 
 from crm_common.errors import ApiError
@@ -28,6 +28,7 @@ def _poll_url(job_id: str) -> str:
     responses={202: {"model": JobAccepted}, 200: {"model": ImageOut}},
 )
 async def edit(
+    request: Request,
     req: EditIn,
     client: str = Depends(require_client),
     wait: float = Query(
@@ -55,6 +56,9 @@ async def edit(
         f"edit:{req.op.type}",
         client,
         lambda: service.post(route.path, route.payload),
+        # Queue turns are taken per end user, so one person bulk-editing an
+        # album cannot put everybody else behind all twenty of their renders.
+        fair_key=getattr(request.state, "fair_key", None),
     )
 
     if wait > 0:

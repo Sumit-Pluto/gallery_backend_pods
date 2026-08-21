@@ -36,10 +36,11 @@ def _health() -> dict:
 
 
 _sweeper_task: asyncio.Task | None = None
+_dispatcher_task: asyncio.Task | None = None
 
 
 async def _startup() -> None:
-    global _sweeper_task
+    global _sweeper_task, _dispatcher_task
     if not auth.client_keys():
         log.critical("CLIENT_API_KEYS is not set — every client request will be rejected.")
     missing = [
@@ -51,11 +52,16 @@ async def _startup() -> None:
     if missing:
         log.warning("upstreams not configured", extra={"missing": missing})
     _sweeper_task = asyncio.create_task(jobs.sweeper())
+    # The queue only exists while this is running: without it, submitted jobs
+    # sit in the deque forever. Started here rather than lazily so a missing
+    # dispatcher fails loudly at boot instead of silently at 3am.
+    _dispatcher_task = asyncio.create_task(jobs.store.dispatcher())
 
 
 async def _shutdown() -> None:
-    if _sweeper_task:
-        _sweeper_task.cancel()
+    for task in (_sweeper_task, _dispatcher_task):
+        if task:
+            task.cancel()
     await upstream.aclose()
 
 

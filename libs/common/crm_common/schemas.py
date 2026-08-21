@@ -244,5 +244,11 @@ class JobStatus(BaseModel):
     created_at: float
     started_at: float | None = None
     finished_at: float | None = None
+    # How many renders are ahead of this one, and roughly how long that is.
+    # Present while queued/running. An upper bound: you may be served sooner
+    # than quoted, never later — the right direction to err when it drives a
+    # progress message.
+    position: int | None = None
+    eta_seconds: int | None = None
     result: dict[str, Any] | None = None
     error: dict[str, Any] | None = None

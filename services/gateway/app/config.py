@@ -35,8 +35,32 @@ UPSTREAM_RETRIES = int(os.environ.get("UPSTREAM_RETRIES", "2"))
 
 # --- jobs ------------------------------------------------------------------
 JOB_TTL_SECONDS = int(os.environ.get("JOB_TTL_SECONDS", "1800"))
-JOB_MAX_QUEUED = int(os.environ.get("JOB_MAX_QUEUED", "64"))
+
+# How many renders the gateway keeps in flight at the diffusion pod. This must
+# match the GPU's real capacity: one diffusion pod running GPU_CONCURRENCY=1 can
+# do exactly one render at a time, so the default is 1. Raise it as you add pods.
+#
+# Keeping this accurate is what moves the queue into the gateway, where a caller
+# can be told their position, instead of leaving it at the pod's semaphore, where
+# they just wait blind until GPU_QUEUE_TIMEOUT kills them.
+JOB_DISPATCH_CONCURRENCY = int(os.environ.get("JOB_DISPATCH_CONCURRENCY", "1"))
+
+# Admission cap: queued + running. Past this, callers are rejected immediately
+# with a `retry_after_s` rather than being accepted into a queue they will never
+# reach the front of.
+#
+# The old default of 64 was dishonest. With one GPU at ~30 s a render, job 64
+# would wait half an hour; long before that the pod-side GPU_QUEUE_TIMEOUT (300 s)
+# would kill it, so the caller waited five minutes and *then* failed. Size this
+# to the wait you are willing to quote: JOB_MAX_QUEUED x avg_render is roughly
+# what the last person in line is promised.
+JOB_MAX_QUEUED = int(os.environ.get("JOB_MAX_QUEUED", "12"))
 JOB_MAX_STORED = int(os.environ.get("JOB_MAX_STORED", "500"))
+
+# Seed for the ETA estimate before any render has completed. Replaced by a
+# rolling average of real durations as soon as there is one.
+JOB_ASSUMED_DURATION = float(os.environ.get("JOB_ASSUMED_DURATION", "45"))
+
 # How long POST /v1/image/edit?wait=N may block before falling back to a job id.
 SYNC_WAIT_MAX = float(os.environ.get("SYNC_WAIT_MAX", "60"))
 
@@ -70,8 +94,18 @@ DETECT_NO_FALLBACK_CODES = {"rate_limited", "queue_full", "gpu_busy"}
 DETECT_MAX_BATCH = int(os.environ.get("DETECT_MAX_BATCH", "32"))
 
 # --- auth / limits ---------------------------------------------------------
+# Per bucket, and the bucket is normally the API key. Since the client's backend
+# holds ONE key for all its users, that made 120/min a limit shared by everybody:
+# one person bulk-uploading an album throttled every other user of the product.
+#
+# Callers can now send `X-End-User: <opaque id>` and get their own bucket. The
+# key still decides *authorisation*; the end-user id only decides fairness, so a
+# forged or missing header can never read another tenant's data — worst case it
+# shares a bucket. Raise RATE_LIMIT_PER_MINUTE if your client cannot send it.
 RATE_LIMIT_PER_MINUTE = int(os.environ.get("RATE_LIMIT_PER_MINUTE", "120"))
 RATE_LIMIT_BURST = int(os.environ.get("RATE_LIMIT_BURST", "30"))
+# Header the client's backend uses to name the end user behind the shared key.
+END_USER_HEADER = os.environ.get("END_USER_HEADER", "X-End-User")
 # Comma-separated origins. Empty (the default) = CORS off = backend-to-backend
 # only, which is the posture the API key assumes.
 CORS_ORIGINS = [o.strip() for o in os.environ.get("CORS_ORIGINS", "").split(",") if o.strip()]

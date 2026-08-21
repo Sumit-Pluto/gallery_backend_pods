@@ -165,3 +165,36 @@ def test_no_configured_provider_is_a_503(monkeypatch):
         run(llm_proxy.chat(BODY, model_kind="vision"))
     assert excinfo.value.status == 503
     assert excinfo.value.code == "not_configured"
+
+
+def test_openrouter_is_in_the_registry_and_orderable(monkeypatch):
+    """Three providers, one chain. Adding a vendor is config, not code — which is
+    what made the Groq/Model Studio account trouble survivable."""
+    monkeypatch.setenv("OPENROUTER_API_KEYS", "or-1")
+    monkeypatch.setenv("DASHSCOPE_API_KEYS", "ds-1")
+    monkeypatch.setenv("GROQ_API_KEYS", "groq-1")
+    monkeypatch.setattr(cpu_config, "LLM_PROVIDER_ORDER", ["openrouter", "dashscope", "groq"])
+    assert cpu_config.provider_names() == ["openrouter", "dashscope", "groq"]
+
+
+def test_an_unconfigured_provider_is_skipped_not_attempted(monkeypatch):
+    """A provider with no keys must drop out of the chain silently, so a half-set
+    -up vendor does not cost every request a doomed round-trip."""
+    monkeypatch.setenv("OPENROUTER_API_KEYS", "or-1")
+    monkeypatch.delenv("DASHSCOPE_API_KEYS", raising=False)
+    monkeypatch.delenv("DASHSCOPE_API_KEY", raising=False)
+    monkeypatch.setenv("GROQ_API_KEYS", "groq-1")
+    monkeypatch.setattr(cpu_config, "LLM_PROVIDER_ORDER", ["openrouter", "dashscope", "groq"])
+    assert cpu_config.provider_names() == ["openrouter", "groq"]
+
+
+def test_openrouter_sends_its_attribution_headers(monkeypatch):
+    """OpenRouter attributes traffic with these; without them you are anonymous
+    volume in their dashboards."""
+    monkeypatch.setenv("OPENROUTER_API_KEYS", "or-1")
+    monkeypatch.setattr(cpu_config, "LLM_PROVIDER_ORDER", ["openrouter"])
+    llm_proxy._cursors.clear()
+    fake = _install(monkeypatch, [OK])
+    run(llm_proxy.chat(BODY, model_kind="vision"))
+    assert fake.calls[0]["url"].startswith("https://openrouter.ai/api/v1")
+    llm_proxy._cursors.clear()

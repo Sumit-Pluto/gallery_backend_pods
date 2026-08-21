@@ -288,6 +288,80 @@ def test_detect_batch_rejects_an_oversized_batch(client, monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
+# Retry policy
+# --------------------------------------------------------------------------- #
+
+
+def test_saturation_is_not_retried(client, monkeypatch):
+    """Retrying a full backend adds load instead of waiting for capacity.
+
+    With UPSTREAM_RETRIES=2 every overloaded request became three, so the system
+    got hit hardest exactly when it was already failing — congestion collapse.
+    """
+    import httpx
+
+    attempts = []
+
+    class Busy:
+        status_code = 503
+        headers = {"content-type": "application/json"}
+        text = '{"error": {"code": "gpu_busy"}}'
+
+        def json(self):
+            return {"error": {"code": "gpu_busy", "message": "GPU queue is saturated",
+                              "detail": {"retry_after_s": 30}}}
+
+    async def post(url, **kwargs):
+        attempts.append(url)
+        return Busy()
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", staticmethod(post))
+    monkeypatch.setattr(upstream.cpu, "base_url", "http://cpu.test")
+    # The autouse stub replaced .post with a recorder; put the real retry logic
+    # back so this test exercises it rather than the stub.
+    monkeypatch.setattr(upstream.cpu, "post", upstream.Upstream.post.__get__(upstream.cpu))
+
+    r = client.post("/v1/vision/detect", json={"image": IMG}, headers=HEAD)
+    assert r.status_code == 503
+    assert r.json()["error"]["code"] == "gpu_busy"
+    assert len(attempts) == 1, f"saturation was retried {len(attempts)} times"
+
+
+def test_a_pod_still_loading_models_is_retried(client, monkeypatch):
+    """not_ready is genuinely transient — that retry is the one worth keeping."""
+    import httpx
+
+    attempts = []
+
+    class Response:
+        def __init__(self, status, body):
+            self.status_code = status
+            self._body = body
+            self.headers = {"content-type": "application/json"}
+            self.text = "{}"
+
+        def json(self):
+            return self._body
+
+    async def post(url, **kwargs):
+        attempts.append(url)
+        if len(attempts) == 1:
+            return Response(503, {"error": {"code": "not_ready"}})
+        return Response(200, {"detections": [], "source": "vlm"})
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", staticmethod(post))
+    monkeypatch.setattr(upstream.cpu, "base_url", "http://cpu.test")
+    # The autouse stub replaced .post with a recorder; put the real retry logic
+    # back so this test exercises it rather than the stub.
+    monkeypatch.setattr(upstream.cpu, "post", upstream.Upstream.post.__get__(upstream.cpu))
+    monkeypatch.setattr(config, "UPSTREAM_RETRIES", 2)
+
+    r = client.post("/v1/vision/detect", json={"image": IMG}, headers=HEAD)
+    assert r.status_code == 200
+    assert len(attempts) == 2
+
+
+# --------------------------------------------------------------------------- #
 # Rate limiting
 # --------------------------------------------------------------------------- #
 
@@ -305,3 +379,51 @@ def test_rate_limit_returns_429_once_the_burst_is_spent(client, monkeypatch):
     ]
     assert codes[:2] == [200, 200]
     assert 429 in codes[2:]
+
+
+def test_rate_limit_buckets_per_end_user(client, monkeypatch):
+    """One shared API key must not mean one shared rate limit.
+
+    The client's backend holds a single key for all its users, so bucketing by
+    key alone meant one person's bulk upload throttled the whole product.
+    """
+    from app import auth
+
+    monkeypatch.setattr(config, "RATE_LIMIT_PER_MINUTE", 60)
+    monkeypatch.setattr(config, "RATE_LIMIT_BURST", 2)
+    auth._buckets.clear()
+
+    # Exhaust one user's burst.
+    alice = {**HEAD, "X-End-User": "alice"}
+    for _ in range(2):
+        client.post("/v1/vision/detect", json={"image": IMG}, headers=alice)
+    assert client.post("/v1/vision/detect", json={"image": IMG}, headers=alice).status_code == 429
+
+    # Bob is unaffected.
+    bob = {**HEAD, "X-End-User": "bob"}
+    assert client.post("/v1/vision/detect", json={"image": IMG}, headers=bob).status_code != 429
+    auth._buckets.clear()
+
+
+def test_end_user_header_is_not_an_authorisation_boundary(client, monkeypatch):
+    """A forged or missing end-user id may only affect throughput, never access.
+
+    Jobs stay owned by the API key fingerprint, so changing the header cannot
+    reach another tenant's render.
+    """
+    from app import auth
+
+    auth._buckets.clear()
+    r = client.post("/v1/image/edit", json={"image": IMG, "op": {"type": "colorize"}},
+                    headers={**HEAD, "X-End-User": "alice"})
+    job_id = r.json()["job_id"]
+
+    # Same key, different declared user -> still readable (key owns it).
+    same_key = client.get(f"/v1/jobs/{job_id}", headers={**HEAD, "X-End-User": "mallory"})
+    assert same_key.status_code == 200
+
+    # Different key -> 404 regardless of the header.
+    other = client.get(f"/v1/jobs/{job_id}",
+                       headers={"X-API-Key": OTHER_KEY, "X-End-User": "alice"})
+    assert other.status_code == 404
+    auth._buckets.clear()

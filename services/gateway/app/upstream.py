@@ -28,6 +28,20 @@ log = logging.getLogger(__name__)
 _client: httpx.AsyncClient | None = None
 _RETRYABLE_STATUSES = {502, 503, 504}
 
+# 503 means two very different things and they need opposite handling.
+#
+#   not_ready   a pod is up but still streaming models off the volume. Transient,
+#               resolves on its own, retrying is exactly right.
+#   gpu_busy /  the backend is SATURATED. Retrying does not wait for capacity, it
+#   pool_busy   adds load — and each retry re-enters the queue ahead of somebody,
+#   queue_full  so under pressure the retries themselves become the pressure.
+#               Classic congestion collapse: the system is slowest precisely when
+#               it is being asked hardest, and UPSTREAM_RETRIES=2 turned every
+#               overloaded request into three.
+#
+# So retry on status, except where the backend has explicitly told us it is full.
+_SATURATION_CODES = {"gpu_busy", "pool_busy", "queue_full", "rate_limited"}
+
 
 def client() -> httpx.AsyncClient:
     global _client
@@ -111,19 +125,29 @@ class Upstream:
                 return response.json()
 
             body = _safe_json(response)
-            if response.status_code in _RETRYABLE_STATUSES and attempt + 1 < attempts:
+            error_code = ((body or {}).get("error") or {}).get("code")
+            saturated = error_code in _SATURATION_CODES
+            if response.status_code in _RETRYABLE_STATUSES and attempt + 1 < attempts and not saturated:
                 log.warning(
                     "upstream retryable status",
                     extra={"upstream": self.name, "status": response.status_code, "attempt": attempt},
                 )
                 await asyncio.sleep(min(2 ** attempt, 5))
                 continue
+            if saturated:
+                # Surface it immediately so the caller can back off with the
+                # `retry_after_s` the backend supplied, instead of us spending
+                # its capacity re-asking on their behalf.
+                log.warning(
+                    "upstream saturated, not retrying",
+                    extra={"upstream": self.name, "code": error_code},
+                )
 
             # Surface the backend's own typed error rather than flattening it.
             error = (body or {}).get("error") or {}
             raise ApiError(
                 error.get("message") or f"The '{self.name}' service failed.",
-                status=response.status_code if response.status_code < 500 else 502,
+                status=_client_status(response.status_code),
                 code=error.get("code") or "upstream_error",
                 detail=error.get("detail"),
             )
@@ -138,6 +162,22 @@ class Upstream:
             return {"configured": True, "ready": response.status_code == 200, **(_safe_json(response) or {})}
         except httpx.HTTPError as exc:
             return {"configured": True, "ready": False, "error": f"{type(exc).__name__}: {exc}"}
+
+
+def _client_status(upstream_status: int) -> int:
+    """Map a backend status onto what the caller should see.
+
+    A backend 500 must not be echoed as 500 — that would claim the *gateway*
+    broke — so it becomes 502. But 503 and 429 mean the same thing at both
+    layers, "temporarily unavailable, come back", and flattening them to 502
+    destroys the distinction the client acts on: 502 says "something failed,
+    retry once", 503 says "we are full, wait `retry_after_s`". Saturation
+    arriving as 502 is how a caller learns to hammer a queue that is already
+    over capacity.
+    """
+    if upstream_status < 500 or upstream_status in (503,):
+        return upstream_status
+    return 502
 
 
 def _safe_json(response: httpx.Response) -> dict | None:
