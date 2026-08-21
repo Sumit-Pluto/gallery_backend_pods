@@ -417,6 +417,7 @@ Ordered by how likely they are.
 | One endpoint family 401s | `INTERNAL_API_KEY` differs between gateway and that pod | Make them byte-identical. |
 | `503 not_configured` | Gateway does not know that pod's URL | Set `VISION_URL` / `DIFFUSION_URL` / `CPU_URL`. Also what you see after recreating a pod — new id, new URL. |
 | `503 not_ready` for ages | Still loading | Normal for 1–2 min; ~30 min on diffusion's first boot. Check the pod log for `warmup complete`. |
+| `internal_error` on every render, but `/readyz` was 200 | Blackwell GPU (any "RTX PRO" card) — cu124 has no sm_120 kernels | Redeploy on Ampere or Ada (RTX 4090, L4, L40S, A5000, A6000). `gpu.self_test()` now refuses at boot rather than letting this reach a user. |
 | CUDA OOM | `GPU_CONCURRENCY > 1`, or `ESRGAN_TILE=0` on 16 GB, or FLUX+SDXL both resident on too small a card | Set concurrency to 1, tile to 400, `RESIDENCY=swap`. |
 | Detection labels get narrower | `source` flipped to `yolo` (only if you enabled the fallback) | Check `provider` in the response and `/v1/status`. Add a provider to `LLM_PROVIDERS` rather than more keys to one. |
 | `queue_full` under load | More renders submitted than one GPU can drain | Expected: it now rejects fast with `retry_after_s` instead of timing out at 5 min. Add a diffusion pod and raise `JOB_DISPATCH_CONCURRENCY`. |

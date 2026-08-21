@@ -7,6 +7,8 @@ render never holds the client's HTTP socket open.
 
 from __future__ import annotations
 
+import asyncio
+
 from . import config  # noqa: F401  — must import first; sets HF_HOME before torch
 
 from crm_common import gpu
@@ -19,8 +21,14 @@ readiness = Readiness()
 
 
 async def warmup() -> None:
+    # Execute before you load. A card the torch build has no kernels for will
+    # happily accept 16 GB of weights and only fail when something actually
+    # runs — which meant readiness passed and every user request 500'd instead.
+    # Probing first also means a bad card is rejected in a second rather than
+    # after a multi-GB download.
+    probe = await asyncio.to_thread(gpu.self_test)
     detail = await gpu.run_exclusive(models.warm, task="warmup")
-    readiness.mark_ready(**detail)
+    readiness.mark_ready(**detail, gpu=probe)
 
 
 app = create_app(

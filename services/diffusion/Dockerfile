@@ -29,6 +29,15 @@ WORKDIR /app
 # The version is pinned for the same reason it is everywhere else here: an
 # unpinned torch lets a new release change what this image contains with no
 # commit of ours, and it is what let pip start that backtracking storm at all.
+#
+# ARCHITECTURE CEILING: cu124 predates Blackwell. This image runs on Ampere
+# (A4000/A5000/A6000/A40) and Ada (RTX 4090, L4, L40S, RTX 4000/6000 Ada), and
+# CANNOT execute a single kernel on a Blackwell card — every "RTX PRO 4000 /
+# 4500 / 6000" is Blackwell. Weights still load, because allocation works on any
+# card the driver enumerates; it dies at the first kernel launch. crm_common's
+# gpu.self_test() now catches that at boot instead of on a user's render.
+# To support Blackwell: move to torch 2.7+/cu128, re-verify the pinned diffusers
+# commit against it, and rebuild.
 RUN pip install --upgrade pip && \
     pip install torch==2.6.0+cu124 \
         --extra-index-url https://download.pytorch.org/whl/cu124

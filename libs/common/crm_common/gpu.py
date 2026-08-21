@@ -77,6 +77,54 @@ async def run_exclusive(fn: Callable[..., Any], *args, task: str = "gpu", **kwar
         _sem().release()
 
 
+def self_test() -> dict:
+    """Prove the card can EXECUTE, not merely allocate.
+
+    Loading a pipeline only allocates VRAM, and allocation succeeds on any GPU
+    the driver enumerates. Kernel *execution* is what fails when the torch build
+    carries no kernels for the device's compute capability — and warmup never
+    ran a forward pass, so a pod could report `ready: true` on a card that then
+    500s every single request.
+
+    Measured for real: torch 2.6.0+cu124 on an RTX PRO 4000 (Blackwell, sm_120)
+    loaded 16 GB of FLUX without complaint, passed readiness, and died at the
+    first kernel launch. cu124 predates Blackwell. The failure surfaced as an
+    opaque `internal_error` on a user's render instead of a refusal at boot.
+
+    One small matmul forces a kernel launch, which is all it takes to catch it.
+    """
+    try:
+        import torch
+    except ImportError:  # pragma: no cover - CPU images
+        return {"cuda": False}
+
+    if not torch.cuda.is_available():
+        return {"cuda": False}
+
+    name = torch.cuda.get_device_name(0)
+    capability = "%d.%d" % torch.cuda.get_device_capability(0)
+    try:
+        probe = torch.ones((8, 8), device="cuda")
+        # .item() forces a synchronise, so an async kernel failure is raised
+        # here rather than surfacing later on somebody's request.
+        value = float((probe @ probe).sum().item())
+        del probe
+    except Exception as exc:
+        raise RuntimeError(
+            f"GPU '{name}' (sm_{capability.replace('.', '')}) cannot execute kernels from this "
+            f"torch build ({getattr(torch, '__version__', '?')}): {type(exc).__name__}: {exc}. "
+            "The usual cause is a card newer than the torch CUDA version — Blackwell needs "
+            "cu128 or later, and this image ships cu124. Deploy on an Ada or Ampere card, "
+            "or rebuild with a newer torch."
+        ) from exc
+
+    if value != 512.0:  # 8x8 of ones, squared, summed
+        raise RuntimeError(f"GPU '{name}' returned {value} for a matmul that must equal 512.")
+
+    return {"cuda": True, "device": name, "capability": capability,
+            "torch": getattr(torch, "__version__", "?")}
+
+
 def empty_cache() -> None:
     """Best-effort VRAM release. Safe to call when torch is absent."""
     try:
