@@ -58,21 +58,62 @@ POST /v1/vision/detect
 {
   "detections": [
     { "name": "excavator", "confidence": 0.91,
-      "box": { "x1": 120.5, "y1": 88.0, "x2": 430.0, "y2": 512.5 } }
+      "box": { "x1": 0.0, "y1": 0.0, "x2": 4032.0, "y2": 3024.0 } }
   ],
-  "source": "vlm"
+  "source": "vlm",
+  "provider": "dashscope",
+  "model": "qwen-vl-plus"
 }
 ```
 
-Box coordinates are **pixels in the image you sent**, top-left origin. Divide by
-the image width/height for fractions.
+**Detection is label-only.** You get *what* is in the photo, not where. Names are
+short lowercase nouns steered toward a canonical construction vocabulary, so the
+same object is named the same way across uploads and your albums do not fragment
+into "hard hat" / "hardhat" / "safety helmet".
+
+`confidence` is the model's self-report, not a calibrated score. Filter on it,
+but do not read precision into it.
+
+`box`, when present, is the **whole image** — a compatibility shim for clients
+whose types require the field. It carries no information; do not draw it. Set
+`DETECT_EMIT_BOX=false` server-side to omit it once your client allows that.
+If you need real boxes, use `?backend=yolo` (below).
+
+`provider` and `model` name whoever actually answered. With failover in play,
+"why did this photo tag differently?" is otherwise unanswerable.
 
 `source` tells you which backend answered:
-- `vlm` — the Qwen vision model (default). No GPU, good coverage, looser boxes.
-- `yolo` — the construction-trained YOLO fallback. Tighter boxes, fixed class list.
+- `vlm` — a Qwen vision model (default). No GPU, open vocabulary, labels only.
+- `yolo` — the construction-trained model on the vision pod. Real boxes, but a
+  **fixed class list**: it cannot return labels outside what it was trained on.
 
-Add `?backend=yolo` to force it. Without that override, a VLM failure falls back
-to YOLO automatically.
+Add `?backend=yolo` to force YOLO. It is no longer an automatic fallback —
+falling back silently changed which labels you got, and it competes for the same
+single GPU slot as upscale and transcribe. Redundancy now happens one layer down,
+across model providers, which fails over without changing the answer's shape.
+
+### Batch
+
+```http
+POST /v1/vision/detect-batch
+{ "images": ["<base64 or url>", "..."], "conf": 0.25 }
+```
+
+```json
+{ "ok": 1, "failed": 1,
+  "results": [
+    { "index": 0, "detections": [ ... ], "source": "vlm", "provider": "dashscope" },
+    { "index": 1, "error": { "code": "bad_request", "message": "not a decodable image" } }
+  ] }
+```
+
+Use this for gallery uploads. The server fans the images out concurrently under
+its own semaphore, so it is faster than N sequential calls **and** gentler on the
+provider rate limit than N parallel ones from your side. Each image reports its
+own result or its own error at its own `index` — one bad image never fails the
+batch, and the response always has one entry per input, in order.
+
+Default cap is 32 images per call; over that you get a 400 telling you the limit.
 
 ## 2. Image editing
 

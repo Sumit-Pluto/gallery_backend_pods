@@ -208,6 +208,85 @@ def test_forced_backend_does_not_silently_fall_back(client, monkeypatch):
     assert r.status_code == 502
 
 
+def test_detect_does_not_fall_back_to_yolo_by_default(client, monkeypatch):
+    """The automatic fallback is off now: YOLO answers a narrower question."""
+    from crm_common.errors import UpstreamError
+
+    seen = []
+
+    async def failing_cpu(path, payload, **kwargs):
+        seen.append("cpu")
+        raise UpstreamError("all providers rate limited")
+
+    async def ok_vision(path, payload, **kwargs):
+        seen.append("vision")
+        return {"detections": [], "source": "yolo"}
+
+    monkeypatch.setattr(upstream.cpu, "post", failing_cpu)
+    monkeypatch.setattr(upstream.vision, "post", ok_vision)
+    monkeypatch.setattr(config, "DETECT_FALLBACK_TO_YOLO", False)
+
+    r = client.post("/v1/vision/detect", json={"image": IMG}, headers=HEAD)
+    assert r.status_code == 502
+    assert seen == ["cpu"]
+
+
+def test_detect_never_falls_back_on_saturation(client, monkeypatch):
+    """A rate limit means 'retry shortly', not 'spend the GPU'.
+
+    Redirecting a throttled bulk upload onto the vision pod's single GPU slot is
+    how one provider hiccup stalls upscale and transcribe too.
+    """
+    from crm_common.errors import RateLimited
+
+    seen = []
+
+    async def throttled_cpu(path, payload, **kwargs):
+        seen.append("cpu")
+        raise RateLimited("slow down")
+
+    async def ok_vision(path, payload, **kwargs):
+        seen.append("vision")
+        return {"detections": [], "source": "yolo"}
+
+    monkeypatch.setattr(upstream.cpu, "post", throttled_cpu)
+    monkeypatch.setattr(upstream.vision, "post", ok_vision)
+    monkeypatch.setattr(config, "DETECT_FALLBACK_TO_YOLO", True)  # even when enabled
+
+    r = client.post("/v1/vision/detect", json={"image": IMG}, headers=HEAD)
+    assert r.status_code == 429
+    assert seen == ["cpu"]
+
+
+def test_detect_batch_routes_to_the_cpu_pod(client, monkeypatch):
+    async def cpu_batch(path, payload, **kwargs):
+        assert path == "/detect-batch"
+        return {
+            "results": [
+                {"index": 0, "detections": [{"name": "hard hat", "confidence": 0.9}]},
+                {"index": 1, "error": {"code": "bad_request", "message": "not an image"}},
+            ],
+            "ok": 1,
+            "failed": 1,
+        }
+
+    monkeypatch.setattr(upstream.cpu, "post", cpu_batch)
+    r = client.post("/v1/vision/detect-batch", json={"images": [IMG, IMG]}, headers=HEAD)
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok"] == 1 and body["failed"] == 1
+    # A box is no longer required — the gallery only ever consumed labels.
+    assert body["results"][0]["detections"][0]["box"] is None
+
+
+def test_detect_batch_rejects_an_oversized_batch(client, monkeypatch):
+    """Reject at the gateway rather than fanning out past the pod's semaphore."""
+    monkeypatch.setattr(config, "DETECT_MAX_BATCH", 2)
+    r = client.post("/v1/vision/detect-batch", json={"images": [IMG] * 3}, headers=HEAD)
+    assert r.status_code == 400
+    assert r.json()["error"]["detail"]["max_batch"] == 2
+
+
 # --------------------------------------------------------------------------- #
 # Rate limiting
 # --------------------------------------------------------------------------- #

@@ -41,10 +41,33 @@ JOB_MAX_STORED = int(os.environ.get("JOB_MAX_STORED", "500"))
 SYNC_WAIT_MAX = float(os.environ.get("SYNC_WAIT_MAX", "60"))
 
 # --- detection -------------------------------------------------------------
-# "vlm"  -> Qwen vision via Groq on the cpu pod (default, no GPU cost)
-# "yolo" -> the YOLO fallback on the vision pod
+# "vlm"  -> Qwen vision on the cpu pod (default, no GPU cost, open vocabulary)
+# "yolo" -> the construction-trained YOLO on the vision pod
 DETECT_BACKEND = os.environ.get("DETECT_BACKEND", "vlm").lower()
-DETECT_FALLBACK_TO_YOLO = os.environ.get("DETECT_FALLBACK_TO_YOLO", "true").lower() == "true"
+
+# Automatic VLM -> YOLO fallback, now OFF by default. Two reasons it stopped
+# being the right default:
+#
+#   1. It answers a different question. YOLO has a fixed class list; the product
+#      needs open-vocabulary labels ("clock", "house") that it cannot produce. A
+#      silent fallback degraded the label vocabulary without telling anyone.
+#   2. It is a cascade risk. YOLO detect runs through the vision pod's
+#      GPU_CONCURRENCY=1 semaphore, the same one serving upscale and transcribe.
+#      A provider rate limit during a bulk upload would redirect every detection
+#      onto that queue and stall unrelated GPU work with it.
+#
+# Redundancy now lives in the cpu pod's provider chain (Model Studio -> Groq),
+# which fails over without changing the answer's shape. Turn this back on only
+# if you accept a narrower label set during an outage.
+DETECT_FALLBACK_TO_YOLO = os.environ.get("DETECT_FALLBACK_TO_YOLO", "false").lower() == "true"
+
+# A rate limit means "retry shortly", not "burn the GPU" — so these codes never
+# trigger the fallback even when it is enabled.
+DETECT_NO_FALLBACK_CODES = {"rate_limited", "queue_full", "gpu_busy"}
+
+# Upper bound the gateway will forward to the cpu pod's /detect-batch. Keep it at
+# or below the pod's own DETECT_MAX_BATCH.
+DETECT_MAX_BATCH = int(os.environ.get("DETECT_MAX_BATCH", "32"))
 
 # --- auth / limits ---------------------------------------------------------
 RATE_LIMIT_PER_MINUTE = int(os.environ.get("RATE_LIMIT_PER_MINUTE", "120"))

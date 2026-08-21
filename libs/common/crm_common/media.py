@@ -127,6 +127,28 @@ def encode_png(img: Image.Image) -> str:
     return base64.b64encode(buf.getvalue()).decode("ascii")
 
 
+def encode_jpeg(img: Image.Image, quality: int = 85) -> str:
+    """JPEG is the right encoding for anything a model only has to *look* at.
+
+    PNG is lossless and roughly an order of magnitude larger for a photograph.
+    A vision model is charged by pixels, not by fidelity, so paying for lossless
+    bytes on the way to a detection call is pure waste. Alpha is flattened onto
+    white because JPEG has no alpha channel and a silent RGBA->RGB crash here
+    would only ever show up in production.
+    """
+    if img.mode not in ("RGB", "L"):
+        if img.mode in ("RGBA", "LA", "P"):
+            rgba = img.convert("RGBA")
+            flat = Image.new("RGB", rgba.size, (255, 255, 255))
+            flat.paste(rgba, mask=rgba.split()[-1])
+            img = flat
+        else:
+            img = img.convert("RGB")
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=quality, optimize=True)
+    return base64.b64encode(buf.getvalue()).decode("ascii")
+
+
 def encode_bytes(raw: bytes) -> str:
     return base64.b64encode(raw).decode("ascii")
 

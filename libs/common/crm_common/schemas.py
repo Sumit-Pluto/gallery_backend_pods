@@ -20,6 +20,8 @@ class DetectIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     image: str = Field(..., description="base64 (optionally data: prefixed) or an http(s) URL")
     conf: float | None = Field(None, ge=0.0, le=1.0)
+    # iou / imgsz are YOLO-only knobs. The VLM path ignores them, but they stay in
+    # the contract so a caller written against the YOLO backend still validates.
     iou: float | None = Field(None, ge=0.0, le=1.0)
     imgsz: int | None = Field(None, ge=320, le=2048)
 
@@ -34,12 +36,44 @@ class Box(BaseModel):
 class Detection(BaseModel):
     name: str
     confidence: float
-    box: Box
+    # Optional because the VLM path is label-only: nothing in the gallery renders
+    # a box, so we do not pay a vision model to reason about coordinates it is
+    # bad at. When DETECT_EMIT_BOX is on, a whole-image box is filled in here so
+    # clients typed against the YOLO contract keep working unchanged.
+    box: Box | None = None
 
 
 class DetectOut(BaseModel):
     detections: list[Detection]
     source: Literal["vlm", "yolo"] = "vlm"
+    # Which provider/model actually answered. Worth returning: with failover in
+    # play, "why did this image tag differently?" is otherwise unanswerable.
+    provider: str | None = None
+    model: str | None = None
+
+
+class DetectBatchIn(BaseModel):
+    """Many images, one call. Each image is still its own upstream request."""
+
+    model_config = ConfigDict(extra="forbid")
+    images: list[str] = Field(..., min_length=1)
+    conf: float | None = Field(None, ge=0.0, le=1.0)
+
+
+class DetectBatchItem(BaseModel):
+    index: int
+    # Exactly one of these is set. A single bad image must not fail the batch.
+    detections: list[Detection] | None = None
+    error: dict | None = None
+    source: Literal["vlm", "yolo"] | None = None
+    provider: str | None = None
+    model: str | None = None
+
+
+class DetectBatchOut(BaseModel):
+    results: list[DetectBatchItem]
+    ok: int
+    failed: int
 
 
 class UpscaleIn(BaseModel):

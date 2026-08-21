@@ -95,6 +95,7 @@ async def root():
         "health": "/healthz",
         "endpoints": [
             "POST /v1/vision/detect",
+            "POST /v1/vision/detect-batch",
             "POST /v1/image/edit",
             "POST /v1/image/upscale",
             "POST /v1/image/remove-bg",
