@@ -101,7 +101,45 @@ class BoundedPool:
 
 
 def _cores() -> int:
-    return os.cpu_count() or 4
+    """Cores this *container* may use — not the host's.
+
+    `os.cpu_count()` reports the machine's cores, and a pod is a container on a
+    much bigger machine. Measured on a 4 vCPU RunPod pod it returned **192**, so
+    both pools were sized to 192 threads against 4 usable cores. That is worse
+    than leaving the work unbounded: the threads all get admitted, then spend
+    their time context-switching instead of finishing.
+
+    cgroup quota is the authoritative answer inside a container, so ask that
+    first and treat everything after it as a fallback.
+    """
+    # cgroup v2 — "<quota> <period>", or "max <period>" when unrestricted.
+    try:
+        with open("/sys/fs/cgroup/cpu.max") as handle:
+            quota, period = handle.read().split()
+        if quota != "max" and int(period) > 0:
+            return max(1, round(int(quota) / int(period)))
+    except (OSError, ValueError):
+        pass
+
+    # cgroup v1
+    try:
+        with open("/sys/fs/cgroup/cpu/cpu.cfs_quota_us") as handle:
+            quota = int(handle.read())
+        with open("/sys/fs/cgroup/cpu/cpu.cfs_period_us") as handle:
+            period = int(handle.read())
+        if quota > 0 and period > 0:
+            return max(1, round(quota / period))
+    except (OSError, ValueError):
+        pass
+
+    # No quota set. The affinity mask is the next best signal, and the host count
+    # the last — both clamped, because an unclamped host count is exactly how
+    # this pod ended up with 192.
+    try:
+        available = len(os.sched_getaffinity(0))
+    except AttributeError:  # not Linux
+        available = os.cpu_count() or 4
+    return max(1, min(16, available))
 
 
 # Heavy, genuinely CPU-bound work: rembg, PP-OCR, ffmpeg denoise. Sized to the

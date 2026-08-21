@@ -99,3 +99,42 @@ def test_batch_gate_is_shared_across_requests():
 
     asyncio.run(main())
     detect_vlm._batch_semaphore = None
+
+
+# --------------------------------------------------------------------------- #
+# Core detection
+# --------------------------------------------------------------------------- #
+
+
+def test_cores_reads_the_cgroup_quota_not_the_host(tmp_path, monkeypatch):
+    """Regression: a 4 vCPU pod reported 192 workers.
+
+    os.cpu_count() answers for the machine, not the container. Sizing a pool off
+    it is worse than not bounding at all — every thread gets admitted and then
+    spends its life context-switching.
+    """
+    cgroup = tmp_path / "cpu.max"
+    cgroup.write_text("400000 100000")  # 4 CPUs
+
+    real_open = open
+
+    def fake_open(path, *args, **kwargs):
+        if str(path) == "/sys/fs/cgroup/cpu.max":
+            return real_open(cgroup, *args, **kwargs)
+        raise FileNotFoundError(path)
+
+    monkeypatch.setattr("builtins.open", fake_open)
+    monkeypatch.setattr(pool.os, "cpu_count", lambda: 192)
+    assert pool._cores() == 4
+
+
+def test_cores_falls_back_when_no_quota_is_set(monkeypatch):
+    """An unrestricted cgroup must still not hand back the host's core count."""
+
+    def fake_open(path, *args, **kwargs):
+        raise FileNotFoundError(path)
+
+    monkeypatch.setattr("builtins.open", fake_open)
+    monkeypatch.setattr(pool.os, "sched_getaffinity", lambda pid: set(range(192)), raising=False)
+    # Clamped, not 192.
+    assert pool._cores() == 16
