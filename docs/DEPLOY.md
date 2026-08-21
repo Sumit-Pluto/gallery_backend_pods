@@ -90,7 +90,13 @@ whether pods run or not — it is the one cost that does not stop when you stop.
 
 Two model sets need a human; everything else downloads itself on first boot.
 
-Attach the volume to any cheap pod temporarily (a CPU pod is fine), then:
+**Use a pod running RunPod's stock template, not one of ours.** Our images have
+no SSH server — PID 1 is uvicorn and nothing listens on port 22, so RunPod's
+"SSH terminal access" checkbox silently does nothing and every connection is
+refused. Deploy a throwaway 2 vCPU pod on the default Ubuntu template, leave the
+container image alone, attach the volume to it, and terminate it when the files
+are up. It is the same physical storage, so what you write there is what the
+service pods read. About two cents.
 
 ```bash
 # from your machine, using the pod's SSH details from the RunPod console
